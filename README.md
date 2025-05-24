@@ -28,7 +28,7 @@
 
 ## 🌐 Giới thiệu
 
-📌 **Trang dự án**: [primuslabs.xyz](https://primuslabs.xyz/)
+📌 **Trang dự án**: [geturanium.io](https://www.geturanium.io?ref=0x7f9d6a031e669c59d31b4ead83abd5507b036085)
 
 <p align="center">
     <img src="intro.jpg" alt="Giới thiệu">
