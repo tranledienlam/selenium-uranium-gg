@@ -50,7 +50,7 @@ class Auto:
         text_el = self.node.get_text(By.CSS_SELECTOR, '[class="relative"]', wait=10)
         if text_el:
             parts = text_el.split('/')
-            if len(parts) == 2:
+            if len(parts) >= 2:
                 try:
                     number = int(parts[0])
                     if number > 0:
@@ -161,7 +161,7 @@ class Auto:
             return
         
         #earn
-        if self.shards_get() > 115000:
+        if self.shards_get() > 135000:
             self.node.log(f"Đủ trên 100k để Earn")
             if self.earn_click():
                 jobs.append('earn')
@@ -178,9 +178,12 @@ class Auto:
             Utility.wait_time(15)
 
         #upgrade
-        while self.upgrade():
-            if "upgrade" not in jobs:
-                jobs.append("upgrade")
+        while True:
+            if self.upgrade():
+                if "upgrade" not in jobs:
+                    jobs.append("upgrade")
+            else:
+                break
 
         self.node.snapshot(f'Hoàn thành công việc {jobs}')
 
