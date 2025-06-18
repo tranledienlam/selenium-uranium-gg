@@ -1,12 +1,8 @@
-# version 20250402
-import requests
 import sys
 import glob
 import time
-import re
 import shutil
 from pathlib import Path
-from io import BytesIO
 from math import ceil
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -25,10 +21,12 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.common.exceptions import TimeoutException, NoSuchElementException, StaleElementReferenceException, ElementClickInterceptedException, ElementNotInteractableException, ElementNotVisibleException, NoSuchWindowException, WebDriverException
 from screeninfo import get_monitors
 
-from utils import Utility
+from utils import Utility, Chromium, TeleHelper, AIHelper
+
+DIR_PATH = Path(__file__).parent
 
 class Node:
-    def __init__(self, driver: webdriver.Chrome, profile_name: str, data_tele: tuple = None) -> None:
+    def __init__(self, driver: webdriver.Chrome, profile_name: str, tele_bot: TeleHelper = None, ai_bot: AIHelper = None) -> None:
         '''
         Khởi tạo một đối tượng Node để quản lý và thực hiện các tác vụ tự động hóa trình duyệt.
 
@@ -38,51 +36,57 @@ class Node:
         '''
         self._driver = driver
         self.profile_name = profile_name
-        self.data_tele = data_tele
+        self.tele_bot = tele_bot
+        self.ai_bot = ai_bot
         # Khoảng thời gian đợi mặc định giữa các hành động (giây)
         self.wait = 3
         self.timeout = 30  # Thời gian chờ mặc định (giây) cho các thao tác
-
-    def _save_screenshot(self):
-        snapshot_dir = Path(__file__).parent / 'snapshot'
-
+    
+    def _get_wait(self, wait: int = None):
+        if wait is None:
+            wait = self.wait
+        return wait
+    
+    def _get_timeout(self, timeout: int = None):
+        if timeout is None:
+            timeout = self.timeout
+        return timeout
+    
+    def _save_screenshot(self) -> str|None:
+        snapshot_dir = DIR_PATH / 'snapshot'
+        screenshot_png = self.take_screenshot()
+        
+        if screenshot_png is None:
+            return None
+        
         if not snapshot_dir.exists():
-            self._log(self.profile_name,
-                      f'Không tin thấy thư mục {snapshot_dir}. Đang tạo...')
+            self.log(f'Không tin thấy thư mục {snapshot_dir}. Đang tạo...')
             snapshot_dir.mkdir(parents=True, exist_ok=True)
             self.log(f'Tạo thư mục Snapshot thành công')
 
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        screenshot_path = snapshot_dir/f'{self.profile_name}_{timestamp}.png'
-        self._driver.save_screenshot(str(screenshot_path))
+        file_path = str(snapshot_dir/f'{self.profile_name}_{timestamp}.png')
+        try:
+            with open(file_path, 'wb') as f:
+                f.write(screenshot_png)
+
+        except Exception as e:
+            self.log(f'❌ Không thể ghi file ảnh: {e}')
+            return None
+        
+        self.log(f'✅ Ảnh đã được lưu tại Snapshot')
+        return file_path
 
     def _send_screenshot_to_telegram(self, message: str):
-        chat_id, telegram_token = self.data_tele
-        # Tạo URL gửi ảnh qua Telegram
-        url = f"https://api.telegram.org/bot{telegram_token}/sendPhoto"
-
-        # Chụp ảnh màn hình và lưu vào bộ nhớ
-        screenshot_png = self._driver.get_screenshot_as_png()
-        screenshot_buffer = BytesIO(screenshot_png)
-        screenshot_buffer.seek(0)  # Đặt con trỏ về đầu tệp
-
-        # Gửi ảnh lên Telegram
+        screenshot_png = self.take_screenshot()
+        
+        if screenshot_png is None:
+            return
+        
         timestamp = datetime.now().strftime('%Y-%m-%d_%H:%M:%S')
-        files = {'photo': ('screenshot.png', screenshot_buffer, 'image/png')}
-        data = {'chat_id': chat_id,
-                'caption': f'[{timestamp}][{self.profile_name}] - {message}'}
-        response = requests.post(url, files=files, data=data)
-
-        # Kiểm tra kết quả
-        if response.status_code == 200:
-            self.log(f'Hình ảnh đã gửi đến bot Tele')
-        else:
-            self.log(
-                f'Không thể gửi "Hình ảnh lỗi" lên Telegram. Mã lỗi: {response.status_code}. Lưu về local'
-            )
-            self._save_screenshot()
-        # Đóng buffer sau khi sử dụng
-        screenshot_buffer.close()
+        message = f'[{timestamp}][{self.profile_name}] - {message}'
+        if self.tele_bot.send_photo(screenshot_png, message):
+            self.log(message=f"✅ Ảnh đã được gửi đến Telegram bot.")
 
     def _execute_node(self, node_action, *args):
         """
@@ -176,6 +180,20 @@ class Node:
         '''
         Utility.logger(profile_name=self.profile_name,
                        message=message, show_log=show_log)
+    
+    def take_screenshot(self) -> bytes|None:
+        """
+        Chụp ảnh màn hình hiện tại của trình duyệt.
+
+        Returns:
+            bytes | None: Ảnh chụp màn hình ở dạng bytes PNG nếu thành công,
+                        None nếu xảy ra lỗi.
+        """
+        try:
+            return self._driver.get_screenshot_as_png()
+        except Exception as e:
+            self.log(f'❌ Không thể chụp ảnh màn hình: {e}')
+            return None
 
     def snapshot(self, message: str = 'Mô tả lý do snapshot', stop: bool = True):
         '''
@@ -191,7 +209,7 @@ class Node:
             Nếu `data_tele` tồn tại, ảnh chụp sẽ được gửi lên Telegram. Nếu không, ảnh sẽ được lưu cục bộ.
         '''
         self.log(message)
-        if self.data_tele:
+        if self.tele_bot.valid:
             self._send_screenshot_to_telegram(message)
         else:
             self._save_screenshot()
@@ -227,8 +245,8 @@ class Node:
             self.new_tab(url="https://www.google.com")
         '''
 
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
+        timeout = self._get_timeout(timeout)
 
         Utility.wait_time(wait)
 
@@ -260,8 +278,9 @@ class Node:
                 - `True`: nếu trang tải thành công.
                 - `False`: nếu có lỗi xảy ra trong quá trình tải trang.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
+        timeout = self._get_timeout(timeout)
+
         methods = ['script', 'get']
         Utility.wait_time(wait)
         if method not in methods:
@@ -284,7 +303,7 @@ class Node:
             self.log(f'Lỗi - Khi tải trang "{url}": {e}')
 
             return False
-        
+
     def wait_for_disappear(
         self,
         by: By | str,
@@ -310,8 +329,8 @@ class Node:
                 - True nếu phần tử biến mất (tức là hoàn tất loading).
                 - False nếu hết timeout mà phần tử vẫn còn (coi như lỗi).
         """
+        wait = self._get_wait(wait)
         timeout = timeout if timeout is not None else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
 
         Utility.wait_time(wait)
         search_context = parent_element if parent_element else self._driver
@@ -345,8 +364,7 @@ class Node:
         except Exception as e:
             self.log(f"❌ Lỗi khi chờ phần tử biến mất ({by}, {value}): {e}")
             return False
-
-
+        
     def get_url(self, wait: int = None):
         '''
         Phương thức lấy url hiện tại
@@ -357,7 +375,7 @@ class Node:
         Returns:
             Chuỗi str URL hiện tại
         '''
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
 
         Utility.wait_time(wait, True)
         return self._driver.current_url
@@ -378,8 +396,9 @@ class Node:
                 - WebElement: nếu tìm thấy phần tử.
                 - `None`: nếu không tìm thấy hoặc xảy ra lỗi.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
+        timeout = self._get_timeout(timeout)
+
         Utility.wait_time(wait)
         try:
             search_context = parent_element if parent_element else self._driver
@@ -400,6 +419,7 @@ class Node:
                 f'Lỗi - không xác định khi tìm phần tử ({by}, {value}) {e}')
 
         return None
+    
     def find_all(self, by: By | str, value: str, parent_element: WebElement = None, wait: int = None, timeout: int = None, show_log: bool = True):
         '''
         Phương thức tìm tất cả các phần tử trên trang web trong khoảng thời gian chờ cụ thể.
@@ -414,8 +434,8 @@ class Node:
         Returns:
             list[WebElement]: Danh sách các phần tử tìm thấy.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
         Utility.wait_time(wait)
 
         try:
@@ -447,8 +467,8 @@ class Node:
         Returns:
             WebElement | None: Trả về phần tử cuối cùng nếu tìm thấy, ngược lại trả về None.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
         Utility.wait_time(wait)
 
         if not isinstance(selectors, list) or len(selectors) < 2:
@@ -521,10 +541,10 @@ class Node:
         - Gọi `.click()` trên phần tử sau khi chờ thời gian ngắn (nếu được chỉ định).
         - Ghi log kết quả thao tác hoặc lỗi gặp phải.
     '''
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
+        Utility.wait_time(wait)
         
         try:
-            Utility.wait_time(wait)
             element.click()
             self.log(f'Click phần tử thành công')
             return True
@@ -569,8 +589,8 @@ class Node:
             - Nếu gặp lỗi, sẽ ghi lại thông báo lỗi cụ thể.
             - Nếu gặp lỗi liên quan đến Javascript (LavaMoat), phương thức sẽ thử lại bằng cách tìm phần tử theo cách khác.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
 
         try:
             search_context = parent_element if parent_element else self._driver
@@ -643,8 +663,8 @@ class Node:
             - Nếu gặp lỗi, sẽ ghi lại thông báo lỗi cụ thể.
             - Nếu gặp lỗi liên quan đến Javascript (LavaMoat), phương thức sẽ thử lại bằng cách tìm phần tử theo cách khác.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
 
         if not text:
             self.log(f'Không có text để nhập vào input')
@@ -709,8 +729,8 @@ class Node:
             element = node.find(By.ID, 'search')
             node.press_key('Tab', parent_element=element)
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
         
         try:
             Utility.wait_time(wait)
@@ -760,8 +780,8 @@ class Node:
             - Nếu phần tử chứa văn bản, phương thức trả về văn bản đó và ghi log thông báo thành công.
             - Nếu gặp lỗi liên quan đến Javascript (LavaMoat), phương thức sẽ thử lại bằng cách tìm phần tử theo cách khác.
         '''
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
 
         try:
             search_context = parent_element if parent_element else self._driver
@@ -806,8 +826,8 @@ class Node:
             bool: True nếu tìm thấy và chuyển đổi thành công, False nếu không.
         '''
         types = ['title', 'url']
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
         found = False
 
         if type not in types:
@@ -871,7 +891,7 @@ class Node:
         Args:
             wait (int, optional): Thời gian chờ trước khi thực hiện reload, mặc định sử dụng giá trị `self.wait = 3`.
         '''
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
 
         Utility.wait_time(wait)
         try:
@@ -896,8 +916,8 @@ class Node:
             bool: True nếu đóng tab thành công, False nếu không.
         '''
 
-        timeout = timeout if timeout or timeout == 0 else self.timeout
-        wait = wait if wait or wait == 0 else self.wait
+        timeout = self._get_timeout(timeout)
+        wait = self._get_wait(wait)
 
         current_handle = self._driver.current_window_handle
         all_handles = self._driver.window_handles
@@ -953,12 +973,11 @@ class Node:
         Mô tả:
             Phương thức sẽ nhận vào 1 element cụ thể, sau đó dùng driver.execute_script() để thực thi script
         '''
-        wait = wait if wait or wait == 0 else self.wait
+        wait = self._get_wait(wait)
 
         Utility.wait_time(wait)
-        
         try:
-            self._driver.execute_script("arguments[0].scrollIntoView({ behavior: 'smooth', block: 'center' });", element)
+            self._driver.execute_script("arguments[0].scrollIntoView({block: 'center'});", element)
             self.log(f'Cuộn thành công')
             return True
         
@@ -969,6 +988,47 @@ class Node:
             
         return False
     
+    def ask_ai(self, prompt: str, is_image: bool = True, wait: int = None) -> str:
+        '''
+        Gửi prompt và hình ảnh (nếu có) đến AI để phân tích và nhận kết quả.
+
+        Args:
+            prompt (str): Câu hỏi hoặc yêu cầu gửi đến AI
+            is_image (bool, optional):  Nếu True, sẽ chụp ảnh màn hình hiện tại và gửi kèm. 
+                                        Nếu False, chỉ gửi prompt không kèm ảnh.
+            wait (int, optional): Thời gian chờ trước khi thực hiện hành động.
+
+        Returns:
+            str: Kết quả phân tích từ AI. Trả về None nếu có lỗi xảy ra.
+        '''
+        wait = self._get_wait(wait)
+
+        if not self.ai_bot.valid:
+            self.log(f'AI bot không hoạt động')
+            return None
+        
+        self.log(f'AI đang suy nghĩ...')
+        Utility.wait_time(wait)
+
+        result, error = None, None
+        if is_image:
+            try:
+                img = self._driver.get_screenshot_as_png()
+                result, error = self.ai_bot.ask(prompt, img)
+            except Exception as e:
+                error = f'Không thể chụp hình ảnh gửi đến AI bot'
+        else:   
+            result, error =  self.ai_bot.ask(prompt)
+        
+        if error:
+            self.log(message=f'{error}')
+            return None
+        
+        if result:
+            self.log(f'AI đã trả lời: "{result[:10]}{"..." if len(result) > 10 else ''}"')
+
+        return result
+        
     def check_window_handles(self):
         Utility.wait_time(5, True)
         original_handle = self._driver.current_window_handle
@@ -1006,8 +1066,10 @@ class BrowserManager:                                                           
 
         self.headless = False
         self.disable_gpu = False
-        self.user_data_dir = Path(__file__).parent/'user_data'
-        self.data_tele = Utility.get_telegram_credentials()
+        self.user_data_dir = DIR_PATH/'user_data'
+        self.path_chromium = Chromium().path
+        self.tele_bot = TeleHelper()
+        self.ai_bot = AIHelper()
         self.matrix = [[None]]
         self.extensions = []
 
@@ -1096,36 +1158,6 @@ class BrowserManager:                                                           
                     self.matrix[row][col] = None
                     return True
         return False
-
-    def _is_proxy_working(self, proxy_info: str = None):
-        ''' Kiểm tra proxy có hoạt động không bằng cách gửi request đến một trang kiểm tra IP
-        
-        Args:
-            proxy_info (str, optional): thông tin proxy được truyền vào có dạng sau
-                - ip:port
-                - username:password@ip:port
-        '''
-        if not proxy_info:
-            return False
-        
-        proxies = {
-            "http": f"http://{proxy_info}",
-            "https": f"https://{proxy_info}",
-        }
-        
-        test_url = "http://ip-api.com/json"  # API kiểm tra địa chỉ IP
-
-        try:
-            response = requests.get(test_url, proxies=proxies, timeout=5)
-            if response.status_code == 200:
-                print(f"✅ Proxy hoạt động! IP: {response.json().get('query')}")
-                return True
-            else:
-                print(f"❌ Proxy {proxy_info} không hoạt động! Mã lỗi: {response.status_code}")
-                return False
-        except requests.RequestException as e:
-            print(f"❌ Proxy {proxy_info} lỗi: {e}")
-            return False
         
     def _browser(self, profile_name: str, proxy_info: str = None, block_media: bool = False) -> webdriver.Chrome:
         '''
@@ -1150,7 +1182,9 @@ class BrowserManager:                                                           
         scale = 1 if (rows == 1) else 0.5
 
         chrome_options = ChromeOptions()
-    
+
+        if self.path_chromium:
+            chrome_options.binary_location = str(self.path_chromium)
         chrome_options.add_argument(
             f'--user-data-dir={self.user_data_dir}/{profile_name}')
         # chrome_options.add_argument(f'--profile-directory={profile_name}') # tắt để sử dụng profile default trong profile_name
@@ -1158,29 +1192,29 @@ class BrowserManager:                                                           
         chrome_options.add_argument("--mute-audio")
         chrome_options.add_argument('--no-first-run')
         chrome_options.add_argument(f"--force-device-scale-factor={scale}")
-        # để có thể đăng nhập google
         chrome_options.add_argument(
-            '--disable-blink-features=AutomationControlled')
+            '--disable-blink-features=AutomationControlled') # để có thể đăng nhập google
         # Tắt dòng thông báo auto
         chrome_options.add_experimental_option('excludeSwitches', ['enable-logging', 'enable-automation'])
         chrome_options.add_experimental_option('useAutomationExtension', False)
+        # chrome_options.add_experimental_option('enableExtensionTargets', True)
         # Ngăn Chrome tự động khôi phục session
-        chrome_options.add_argument("--disable-features=InfiniteSessionRestore,SessionService,TabDiscarding")
-        chrome_options.add_argument("--disable-session-crashed-bubble") 
+        # chrome_options.add_argument("--disable-features=InfiniteSessionRestore,SessionService,TabDiscarding")
+        # chrome_options.add_argument("--disable-session-crashed-bubble") 
         # vô hiệu hóa save mật khẩu
         prefs = {
-            "profile.default_content_setting_values.notifications": 2,
-            "credentials_enable_service": False,
-            "profile.password_manager_enabled": False,
+        #     "profile.default_content_setting_values.notifications": 2,
+        #     "credentials_enable_service": False,
+        #     "profile.password_manager_enabled": False,
             "profile.managed_default_content_settings.images": 1,
             "profile.managed_default_content_settings.video": 1,
-            # Tắt gợi ý đăng nhập Chrome
-            "signin.allowed": False,
-            "sync_disable": True,
-            "signout.allowed": True,
-            "enable_sync": False,
-            "signin.allowed_on_next_startup": False,
-            "credentials_enable_autosignin": False
+        #     # Tắt gợi ý đăng nhập Chrome
+        #     "signin.allowed": False,
+        #     "sync_disable": True,
+        #     "signout.allowed": True,
+        #     "enable_sync": False,
+        #     "signin.allowed_on_next_startup": False,
+        #     "credentials_enable_autosignin": False
         }
         # block image và video để tăng hiệu suất, nhưng cần tắt khi có cloudflare
         if block_media:
@@ -1205,22 +1239,20 @@ class BrowserManager:                                                           
 
         service = Service(log_path='NUL')
 	  
-        seleniumwire_options = {
-            'verify_ssl': True  # ✅ False Bỏ qua xác thực SSL
-        }
-        # end demo loại bỏ not secure, nhưng chưa đc
+        # # run proxy
+        use_proxy = None
         if proxy_info:
             self._log(profile_name, 'Kiểm tra proxy')
-        use_proxy = Utility.is_proxy_working(proxy_info)
+            use_proxy = Utility.is_proxy_working(proxy_info)
         self._log(profile_name, 'Đang mở Chrome...')
         if use_proxy:
             try:
                 from seleniumwire import webdriver
                 seleniumwire_options = {
+                'verify_ssl': True,  # ✅ False Bỏ qua xác thực SSL
                 'proxy': {
                     'http': f'http://{proxy_info}',
-                    'https': f'https://{proxy_info}',
-                    'no_proxy': 'localhost,127.0.0.1'
+                    'https': f'https://{proxy_info}'
                 }
             }
 
@@ -1235,7 +1267,6 @@ class BrowserManager:                                                           
             except Exception as e:
                 self._log(profile_name, f'Lỗi khi không sử dụng proxy: {e}')
                 exit()
-
         return driver
 
     def config_extension(self, *args: str):
@@ -1254,24 +1285,24 @@ class BrowserManager:                                                           
         Ví dụ:
             config_extension('ext1.crx', 'ext2.crx')
         '''
-        extensions_path = Path(__file__).parent / 'extensions'
+        extensions_path = DIR_PATH / 'extensions'
         
         if not extensions_path.exists():
             return
 
         for arg in args:
             # Nếu có ký tự '*' trong tên, thực hiện tìm kiếm
+            ext_path = extensions_path / arg
             if '*' in arg:
-                matched_files = glob.glob(str(extensions_path / arg))
+                matched_files = glob.glob(str(ext_path))
                 if matched_files:
                     ext_path = max(matched_files, key=lambda f: Path(
                         f).stat().st_ctime)  # Chọn file mới nhất
                 else:
-                    self._log(
+                    self._log(message=
                         f'Lỗi: {ext_path} không tồn tại. Dừng chương trình')
                     exit()
             else:
-                ext_path = extensions_path / arg
                 if not ext_path.exists():
                     self._log(
                         f'Lỗi: {ext_path} không tồn tại. Dừng chương trình')
@@ -1317,9 +1348,8 @@ class BrowserManager:                                                           
         profile_name = profile['profile_name']
         proxy_info = profile.get('proxy_info')
         driver = self._browser(profile_name, proxy_info, block_media)
-        node = Node(driver, profile_name, self.data_tele)
         self._arrange_window(driver, row, col)
-
+        node = Node(driver, profile_name, self.tele_bot, self.ai_bot)
         try:
             # Khi chạy chương trình với phương thức run_stop. Duyệt trình sẽ duy trì trạng thái
             if stop_flag:
@@ -1438,13 +1468,25 @@ class BrowserManager:                                                           
         '''
         self.headless = headless
         self.disable_gpu = disable_gpu
-        user_data_dir = Path(__file__).parent / 'user_data'
         
         is_run = True
+
+        print("\n"+"=" * 60)
+        print(f"⚙️  Tool Automation Airdrop đang sử dụng:")
+        if self.path_chromium:
+            print(f"   📍 Chrome tải về. Đường dẫn: {self.path_chromium}")
+        else:
+            print(f"   📍 Chrome hệ thống")
+        if self.tele_bot.valid:
+            print(f"   📍 Tele bot: {self.tele_bot.bot_name}")
+        if self.ai_bot.valid:
+            print(f"   📍 AI bot Gemini: {self.ai_bot.model_name}")
+        print("=" * 60+"\n")
+
         while is_run:
             user_data_profiles = []
-            if user_data_dir.exists() and user_data_dir.is_dir():
-                raw_user_data_profiles = [folder.name for folder in user_data_dir.iterdir() if folder.is_dir()]
+            if self.user_data_dir.exists() and self.user_data_dir.is_dir():
+                raw_user_data_profiles = [folder.name for folder in self.user_data_dir.iterdir() if folder.is_dir()]
                 
                 # Thêm các profile theo thứ tự trong profiles trước
                 for profile in profiles:
@@ -1458,12 +1500,12 @@ class BrowserManager:                                                           
                         user_data_profiles.append(profile_name)
             
             if not auto:
-                print("\n[A]. Chọn một tùy chọn:")
-                print("1. Set up (mở lần lượt từng profile để cấu hình)")
-                print("2. Chạy auto (tất cả profiles sau khi đã cấu hình)")
+                print("[A] 📋 Chọn một tùy chọn:")
+                print("   1. Set up       - Mở lần lượt từng profile để cấu hình.")
+                print("   2. Chạy auto    - Tất cả profiles sau khi đã cấu hình.")
                 if user_data_profiles:
-                    print("3. Xóa profile") # đoạn này xuất hiện, nếu có tồn tại danh sách user_data_profiles ở trên
-                print("0. Thoát")
+                    print("   3. Xóa profile  - Xoá các profile đã tồn tại.") # đoạn này xuất hiện, nếu có tồn tại danh sách user_data_profiles ở trên
+                print("   0. Thoát        - Thoát chương trình.")
                 choice = input("Nhập lựa chọn: ")
             else:
                 choice = '2'
@@ -1474,18 +1516,19 @@ class BrowserManager:                                                           
 
                 if not auto:
                     profile_list = profiles if choice in ('1', '2') else user_data_profiles
+                    print("=" * 10)
                     if choice in ('1', '2'):
                         print(
-                            f"[B]. Chọn các profile muốn chạy {'Set up' if choice == '1' else 'Auto'}:")
+                            f"[B] 📋 Chọn các profile muốn chạy {'Set up' if choice == '1' else 'Auto'}:")
                         print(f"❌ Không tồn tại profile trong file data.txt") if len(profile_list) == 0 else None
                     elif (choice in ('3')):
                         if not user_data_profiles:
                             continue
-                        print("[B]. Chọn các profile muốn xóa:")
+                        print("[B] 📋 Chọn các profile muốn xóa:")
 
-                    print(f"0. ALL ({len(profile_list)})") if len(profile_list) > 1 else None
+                    print(f"   0. ALL ({len(profile_list)})") if len(profile_list) > 1 else None
                     for idx, profile in enumerate(profile_list, start=1):
-                        print(f"{idx}. {profile['profile_name'] if choice in ('1', '2') else profile}{' [✓]' if choice in ('1', '2') and profile['profile_name'] in user_data_profiles else ''}")
+                        print(f"   {idx}. {profile['profile_name'] if choice in ('1', '2') else profile}{' [✓]' if choice in ('1', '2') and profile['profile_name'] in user_data_profiles else ''}")
 
                     profile_choice = input(
                         "Nhập số và cách nhau bằng dấu cách (nếu chọn nhiều) hoặc bất kì để quay lại: ")
@@ -1503,44 +1546,49 @@ class BrowserManager:                                                           
                             if 0 <= index < len(profile_list):  # Kiểm tra index hợp lệ
                                 selected_profiles.append(profile_list[index])
                             else:
-                                self._log(message=f"⚠ Profile {ch} không hợp lệ, bỏ qua.")
+                                print(f"⚠ Profile {ch} không hợp lệ, bỏ qua.")
 
                 if not selected_profiles:
-                    self._log(message="Lựa chọn không hợp lệ. Vui lòng thử lại.")
+                    Utility.print_section('LỖI: Lựa chọn không hợp lệ. Vui lòng thử lại...', "🛑")
                     continue
-
+                
                 if choice == '1':
+                    Utility.print_section("BẮT ĐẦU CHƯƠNG TRÌNH","🔄")                
                     self.run_stop(selected_profiles, block_media)
+                    Utility.print_section("KẾT THÚC CHƯƠNG TRÌNH","✅")                
+                
                 elif choice == '2':
+                    Utility.print_section("BẮT ĐẦU CHƯƠNG TRÌNH","🔄")                
                     self.run_multi(profiles=selected_profiles,
                                    max_concurrent_profiles=max_concurrent_profiles, block_media=block_media)
+                    Utility.print_section("KẾT THÚC CHƯƠNG TRÌNH","✅")                
+
                 elif choice == '3':
                     profiles_to_deleted = []
                     for profile_name in selected_profiles:
-                        profile_path = user_data_dir / profile_name
+                        profile_path = self.user_data_dir / profile_name
                         try:
                             shutil.rmtree(profile_path)
                             profiles_to_deleted.append(profile_name)
                         except Exception as e:
                             self._log(message=f"❌ Lỗi khi xóa profile {profile_name}: {e}")
-                    self._log(message=f"✔ Đã xóa profile: {profiles_to_deleted}")
-
+                    Utility.print_section(f"Đã xóa profile: {profiles_to_deleted}")
             elif choice == '0':  # Thoát chương trình
                 is_run = False
-                print("Thoát chương trình.")
+                Utility.print_section("THOÁT CHƯƠNG TRÌNH","❎")
 
             else:
-                print("Lựa chọn không hợp lệ. Vui lòng nhập lại.")
+                Utility.print_section('LỖI: Lựa chọn không hợp lệ. Vui lòng thử lại...', "🛑")
 
 
 if __name__ == '__main__':
-    profiles = Utility.get_data('profile_name')
+    profiles = Utility.read_data('profile_name')
     if not profiles:
         print("Không có dữ liệu để chạy")
         exit()
     browser_manager = BrowserManager()
     browser_manager.config_extension('meta-wallet-*.crx')
-    # browser_manager.run_browser(profiles[1])
+    # browser_manager.run_browser(profiles[0])
     browser_manager.run_terminal(
         profiles=profiles,
         max_concurrent_profiles=4,

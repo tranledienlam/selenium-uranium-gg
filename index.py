@@ -194,7 +194,7 @@ if __name__ == '__main__':
     parser.add_argument('--disable-gpu', action='store_true', help="Tắt GPU")
     args = parser.parse_args()
 
-    profiles = Utility.get_data('profile_name', 'email', 'password')
+    profiles = Utility.read_data('profile_name', 'email', 'password')
     if not profiles:
         print("Không có dữ liệu để chạy")
         exit()
