@@ -2,7 +2,17 @@
 
 ## ⚠ Lưu ý quan trọng
 
-🔴 **Dự án này có chứa code hint.** Vui lòng tìm đến **bài ghim** trong kênh [Telegram Channel](https://t.me/+8o9ebAT9ZSFlZGNl) để kiểm tra trước khi sử dụng.
+🔴 **Dự án này có chứa code hint.**
+
+Vui lòng tìm đến **bài ghim** trong kênh [Telegram Channel](https://t.me/+8o9ebAT9ZSFlZGNl) để kiểm tra trước khi sử dụng.
+
+🔴 **Tool sẽ tự tải phiên bản chromium 136.**
+
+Để đảm bảo automation hoạt động ổn định, yêu cầu sử dụng Chrome/Chromium phiên bản 136 hoặc thấp hơn.
+
+Trong trường hợp quá trình tải tự động thất bại, tool sẽ mặc định sử dụng Chrome đã được cài sẵn trên máy tính.
+
+[Nguồn tải chromium](https://github.com/macchrome/winchrome/releases)
 
 ---
 
@@ -36,7 +46,7 @@
 
 ---
 
-## 🎬 Video demo (cập nhật sau)
+## 🎬 Video demo (Không có)
 
 <!-- <p align="center">
     <a href="">
@@ -110,18 +120,22 @@
 
 - Chức năng của từng bot:
   - **Telegram Bot**: Gửi ảnh chụp màn hình đến tài khoản Telegram cá nhân trong quá trình thực thi. Nếu không được cấu hình, ảnh sẽ được lưu vào thư mục snapshot.
-  - **AI Bot**: Hỗ trợ phân tích và xác định luồng thực thi. Nếu không được cấu hình, các chức năng AI sẽ bị bỏ qua.
+  - **AI Bot**: Hỗ trợ phân tích luồng hoặc chức năng riêng biệt. Nếu không được cấu hình, các chức năng AI sẽ bị bỏ qua.
 
 - Cấu trúc file: Mỗi dòng bắt đầu bằng từ khóa `tele_bot` hoặc `ai_bot`
   ```plaintext
-  tele_bot|[User_ID]|[Bot_ID:Telegram_Bot_Token]
-  ai_bot|[AI_Bot_Token]
+  tele_bot|<USER_ID>|<BOT_TOKEN>|<ENDPOINT_URL (tùy chọn)>
+  ai_bot|<AI_BOT_TOKEN>
   ```
 - Ví dụ:
   ```plaintext
-  tele_bot|123456789|7934583453:AAFcOebukTPfkL6dfg4_PH_ahBA0lU36xyc
+  tele_bot|123456789|7934583453:AAFcOebukTPfkL6dfg4_PH_ahBA0lU36xyc|https://vidu.automation.workers.dev
   ai_bot|AIzaSyAasvkX_3nexsTcRALfsvbUeLmzpSz0JvA
   ```
+
+👉 [Hướng dẫn lấy token Tele bot](#1️⃣-cấu-hình-tele_bot-trong-file-tokentxt-để-theo-dõi-lỗi)
+
+👉 [Hướng dẫn lấy token AI bot](#2️⃣-cấu-hình-ai_bot-trong-file-tokentxt-khi-tool-cần-thực-hiện-chức-năng-riêng-biệt) (Tool này không cần chức năng AI, bỏ qua)
 
 ### 3️ Cài đặt Python & thư viện
 
@@ -209,6 +223,9 @@ browser_manager.run_terminal(
 
 - Mỗi dự án có một bot Telegram riêng, giúp theo dõi lỗi dễ dàng hơn.
 - **Hướng dẫn lấy token Telegram:** Truy cập [channel](https://t.me/+8o9ebAT9ZSFlZGNl), tìm bài viết `Cách lấy thông tin cho file token.txt`.
+- **Hướng dẫn lấy ENDPOINT_URL:** Truy cập [cloudflare](https://www.cloudflare.com/) và tạo 1 workers
+
+👉 [Video Hướng dẫn cách lấy UserID - Token Bot và tạo endpoint url cho bot telegram](https://www.youtube.com/watch?v=2lAiI-s04gY)
 
 ### 2️⃣ Cấu hình **ai_bot** trong file `token.txt` để xác định luồng tốt hơn.
 
@@ -225,10 +242,10 @@ browser_manager.run_terminal(
 
 Để chạy chương trình đơn giản hơn, bạn có thể sử dụng file `run_menu.bat` bằng cách click đúp chuột trực tiếp vào file, thay vì phải mở code và gõ lệnh trong CMD.
 
-Nếu bạn đang sử dụng Python trong môi trường ảo (virtual environment), hãy chỉnh sửa đường dẫn Python `H:\venv_selenium\Scripts\python.exe` trong file `run_menu.bat`:
+Nếu bạn đang sử dụng Python trong môi trường ảo (virtual environment), hãy chỉnh sửa đường dẫn Python `H:\venv\Scripts\python.exe` trong file `run_menu.bat`:
 
 ```
-set VENV_PATH=H:\venv_selenium\Scripts\python.exe
+set VENV_PATH=H:\venv\Scripts\python.exe
 ```
 
 ### 4️⃣ Chạy tự động ẩn với Windows Task Scheduler
