@@ -242,10 +242,10 @@ browser_manager.run_terminal(
 
 Để chạy chương trình đơn giản hơn, bạn có thể sử dụng file `run_menu.bat` bằng cách click đúp chuột trực tiếp vào file, thay vì phải mở code và gõ lệnh trong CMD.
 
-Nếu bạn đang sử dụng Python trong môi trường ảo (virtual environment), hãy chỉnh sửa đường dẫn Python `H:\venv\Scripts\python.exe` trong file `run_menu.bat`:
+Nếu bạn đang sử dụng Python trong môi trường ảo (virtual environment), hãy chỉnh sửa đường dẫn Python `E:\venv\Scripts\python.exe` trong file `run_menu.bat`:
 
 ```
-set VENV_PATH=H:\venv\Scripts\python.exe
+set VENV_PATH=E:\venv\Scripts\python.exe
 ```
 
 ### 4️⃣ Chạy tự động ẩn với Windows Task Scheduler

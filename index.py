@@ -1,6 +1,7 @@
 
 import argparse
 import time
+import math
 from selenium.webdriver.common.by import By
 
 from browser_automation import BrowserManager, Node
@@ -68,11 +69,11 @@ class Auto:
         text = self.node.get_text(By.XPATH, '//div[div[div[@class="relative"]]]//span')
         shards = None
         try:
-            if ',' in text:
+            if text and ',' in text:
                 shards = int(text.replace(',',''))
-            elif '.' in text:
+            elif text and '.' in text:
                 shards = int(text.replace('.',''))
-            else:
+            elif text:
                 shards = int(text)
         except Exception as e:
             self.node.log(f'Lỗi chuyển đổi chuỗi shards thành số: {e}')
@@ -88,12 +89,10 @@ class Auto:
 
     def earn_click(self):
         self.node.find_and_click(By.XPATH, '//span[contains(text(), "Earn")]')
-        # kiểm tra số point trên >100k
-        el = self.node.find(By.XPATH, '//h1[contains(text(), "Account Verification")]')
-        self.node.scroll_to(el)
+
         button_earn = self.earn_button()
-        
         if button_earn:
+            self.node.scroll_to(button_earn)
             self.node.click(button_earn)
             if self.earn_button():
                 self.node.snapshot(f'Click earn thất bại', False)
@@ -104,16 +103,17 @@ class Auto:
         else:
             el_text = self.node.get_text(By.XPATH, '//div[div[contains(text(), "remaining")]]')
             # match = re.search(r"(\d{2})\s*hr.*?(\d{2})\s*min.*?(\d{2})\s*sec", el_text)
-            parts = el_text.split('\n')
-            try:
-                hours = parts[1]
-                minutes = parts[4]
-                seconds = parts[7]
-                self.node.snapshot(f"Quay lại earn sau {hours}:{minutes}:{seconds}", False)
-                return True
-            except IndexError:
-                self.node.snapshot(f"Không kiểm tra được còn bao lâu. Chuỗi không đúng định dạng.", False)
-                return False
+            if el_text:
+                parts = el_text.split('\n')
+                try:
+                    hours = parts[1]
+                    minutes = parts[4]
+                    seconds = parts[7]
+                    self.node.snapshot(f"Quay lại earn sau {hours}:{minutes}:{seconds}", False)
+                    return True
+                except IndexError:
+                    self.node.snapshot(f"Không kiểm tra được còn bao lâu. Chuỗi không đúng định dạng.", False)
+            return False
 
     def mine(self):
         booster_buttons = []
@@ -161,13 +161,15 @@ class Auto:
             return
         
         #earn
-        if self.shards_get() > 135000:
+        shards = self.shards_get()
+        if shards and shards > 135000:
             self.node.log(f"Đủ trên 100k để Earn")
             if self.earn_click():
                 jobs.append('earn')
         
         #mine
-        if self.shards_get() < 15000:
+        shards = self.shards_get()
+        if shards and shards < 15000:
             self.node.snapshot(f'Cần click tay để kiếm thêm shards')
         
         time_end = time.time() + 630
@@ -178,13 +180,14 @@ class Auto:
             Utility.wait_time(15)
 
         #upgrade
-        while True:
-            if self.upgrade():
-                if "upgrade" not in jobs:
-                    jobs.append("upgrade")
-            else:
-                break
-
+        shards = self.shards_get()
+        if shards and math.modf(shards / 100000)[0] > 15000:
+            while True:
+                if self.upgrade():
+                    if "upgrade" not in jobs:
+                        jobs.append("upgrade")
+                else:
+                    break
         self.node.snapshot(f'Hoàn thành công việc {jobs}')
 
 if __name__ == '__main__':
